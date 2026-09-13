@@ -127,19 +127,26 @@ export const METHODOLOGY = Object.freeze({
   stabilisationWindowDays: 60,
 
   /**
-   * `discoveryBudgetFilings` — a count of OpenDART receipts one run may read
-   * while **looking for** something, as opposed to while reviewing what is held.
+   * `discoveryIndexPages` — pages of the **whole-market** OpenDART index one run
+   * reads while **looking for** something, as opposed to while reviewing what is
+   * held.
    *
-   * 100, and the number is read off the vendor rather than chosen. The host's
-   * filings index requests a fixed `page_count=100`, newest-first, over a
-   * five-year window (`skills/ct-event-sweep/SKILL.md` carries the measured
-   * contract), so one page is the natural unit of a sweep and this budget is one
-   * page. ⚠️ It is a **cost ceiling and never a correctness rule**: exceeding it
-   * is a `note`, and what is refused is spending the whole budget on held names
-   * and then reporting that nothing new qualified — that run is
-   * `discovery_not_run` (`aumos-catalogue#305`).
+   * 3, and the unit is the whole point. A page is one `/api/list.json` call with
+   * **no `corp_code`** in it — every issuer that filed in the window, 100 rows
+   * newest-first (`skills/ct-event-sweep/SKILL.md` carries the measured
+   * contract) — so a page is what *looking* costs, and the per-issuer work that
+   * follows is bounded by the shortlist rule (at most three names researched in
+   * one run) rather than by this number. ⚠️ It is a **cost ceiling and never a
+   * correctness rule**: exceeding it is a `note`. Reading **no** page is the
+   * other thing entirely, and that run is `discovery_not_run`
+   * (`aumos-catalogue#305`).
+   *
+   * ⚠️ **Renamed from `discoveryBudgetFilings` (100).** The old name said
+   * «filings» and was duly read as «100 filings of one issuer», which is how a
+   * run spent a whole sweep on a single name and reported a market it never
+   * looked at.
    */
-  discoveryBudgetFilings: 100,
+  discoveryIndexPages: 3,
 
   /**
    * `researchCompletionFloor` — how many shortlisted candidates one run must

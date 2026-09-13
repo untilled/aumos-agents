@@ -55,7 +55,7 @@ invented a horizon per run would be a different methodology every month with one
 | `defaultSingleNameCap` | **0.20** | portfolio weight | the ceiling on one name from this strategy, when the Mandate says nothing narrower. **Never the order size** |
 | `trimPriceProgress` | **0.70** | fraction | progress along `(price − entry) / (target − entry)` at which a realised catalyst is trimmed |
 | `stabilisationWindowDays` | **60** | sessions | the window behind the price-stabilisation check, which **confirms and never qualifies** |
-| `discoveryBudgetFilings` | **100** | count | OpenDART receipts one run may read while *looking*, as opposed to while reviewing what is held. One page of the filings index. A cost ceiling, never a correctness rule |
+| `discoveryIndexPages` | **3** | pages | whole-market OpenDART index pages — `/api/list.json` with **no `corp_code`**, 100 rows each — one run reads while *looking*, as opposed to while reviewing what is held. A cost ceiling on the cheap half of the sweep, never a correctness rule; **zero pages read is `discovery_not_run`** |
 | `researchCompletionFloor` | **1** | count | shortlisted candidates this run must take **all the way** before it ends. Reading three names shallowly and stopping is not a run |
 
 Say in your reasoning which of these you fell back to, if any.
@@ -243,23 +243,34 @@ market every run re-finds the same famous names and never finishes anything.
    range that failed last run is retried before any new receipt is read, and a candidate left in
    `researching` with open questions is finished before a new one is opened. ⚠️ Retrying a failed
    range increments its `attempts`; it never rewrites the entry, because the count is the record of
-   how long that hole has been open.
+   how long that hole has been open. ⛔ **The index pages of step 3 are read anyway, resume or no
+   resume** — a page is one call, resuming is not an exemption from it, and a desk that lets the
+   resume queue eat whole runs discovers nothing for as long as the queue is not empty.
 2. **Declare the universe and the filing window.** Say, in the run's own record, which listing you
    swept and where it came from — the whole-market enumeration, or a stated subset *with the reason
    it is a subset*. ⛔ An undeclared universe is not a smaller sweep; it is no denominator, and with
    no denominator "nothing qualified" is a sentence you may not write.
-3. **Sweep.** Read new receipts from the last successful cursor forward, in ranges, through the
-   **`ct-event-sweep`** skill — it carries the OpenDART cache procedure, the `corp_code` join, the
-   classification you have to do yourself because the index has no type filter, and the difference
-   between status `013` and status `020`. The web lane runs beside it for the policy gazettes and
-   ministry notices that half of these cases begin in, and every web reading is filed through
-   `observation:file` before it is cited.
+3. **Sweep the whole market first, then read a few names deeply.** ⛔ **The sweep is
+   `/api/list.json` with `corp_code` left out** — one call answers for every issuer that filed since
+   your cursor, 100 rows a page, and `discoveryIndexPages` of those pages is what looking costs.
+   Classify each row from `report_nm`, and only then spend the per-issuer calls — the `corp_code`
+   join, the filings, the financials — on the three to five names the classification picked out.
+   A join per ticker before anything is classified is the failure this step is written against: at
+   three calls a name, 804 issuers are 2,412 calls and the run reads one. All of it is in the
+   **`ct-event-sweep`** skill — the `corp_cls` and `pblntf_ty` tables, the OpenDART cache procedure,
+   the `corp_code` join every per-issuer read owes, the classification you have to do yourself
+   because the index has no type filter, and the difference between status `013` and status `020`.
+   The web lane runs beside it for the policy gazettes and ministry notices that half of these cases
+   begin in, and every web reading is filed through `observation:file` before it is cited.
 4. **Shortlist.** At most **three** names get basic research in one run, and at least
    `researchCompletionFloor` of them is taken **all the way** — the traced path, the survivability
    answer, the invalidation conditions. ⛔ Reading five names shallowly and stopping is not a run.
    The rest are stored with their open questions and their next review condition.
 5. **Record and write back.** The discovery record and the candidate ledger are both written, with
-   the cursor inside each document.
+   the cursor inside each document. ⛔ **Both are written *before* `decision_submit` and never
+   after.** The workspace closes with the judgement: a `files_write` that follows the submit comes
+   back `workspace-write-failed: The database connection is not open`, an error that names neither
+   the cause nor the fix, and everything the run found after sealing its answer is lost in silence.
 
 ⛔ **The gate, and it is the only one.** A name becomes a candidate when there is a written path
 **사건 → 이 회사의 매출/비용 → 현금흐름**, with the period in which it can be checked. All three links
@@ -278,7 +289,12 @@ gazette is last year's story with a fresh discovery date on it.
 
 ### The two records this stage writes
 
-The discovery record — one per run, and these are the field names, not a description of them:
+The discovery record — one per run, and these are the field names, not a description of them.
+⚠️ **`indexPagesRead` and `symbolsAttempted` are the width of the sweep and neither may be left
+blank**: the first is how many whole-market index pages this run actually read, the second how many
+distinct issuers those pages put in front of it, and `universeCount` is the denominator both are read
+against. A run that says `discovery_incomplete` and nothing else has not said whether it read one
+issuer or seven hundred.
 
 ```json
 {
@@ -288,6 +304,7 @@ The discovery record — one per run, and these are the field names, not a descr
   "universeDeclared": true,
   "universeSource": "toss:/api/v1/stocks/all",
   "universeCount": 942,
+  "indexPagesRead": 3,
   "symbolsAttempted": 120,
   "symbolsSucceeded": 117,
   "symbolsFailed": ["005930", "068270", "051910"],
@@ -377,7 +394,7 @@ Four words, and they are a closed set. Take the first that applies:
 
 | status | when |
 |---|---|
-| `discovery_not_run` | no universe was declared, or the filing budget went on the held book, or every required lane was dark or unstated, or the candidate ledger was not read |
+| `discovery_not_run` | **no index page was read** — the run went entirely on the held book, or the sweep never ran — or no universe was declared, or every required lane was dark or unstated, or the candidate ledger was not read |
 | `discovery_incomplete` | the universe was declared and some range failed or was not reached, **or** a required lane is not `open` |
 | `candidates_produced` | the sweep ran and at least one name came out of it |
 | `no_candidate_qualified` | ⛔ **only** when `universeDeclared` is true **and** every lane this strategy requires is `open` **and** `symbolsFailed` is empty |
@@ -680,8 +697,8 @@ with a reason; a missing *supporting* figure is uncertainty on a judgement you s
 
 ### Report the sweep, whatever else this run decided
 
-Every run states its discovery record — `universeDeclared`, `universeCount`, `symbolsAttempted`,
-`symbolsSucceeded`, `symbolsFailed`, `gatePassed`, `newCandidates`, `resumedCandidates`,
+Every run states its discovery record — `universeDeclared`, `universeCount`, `indexPagesRead`,
+`symbolsAttempted`, `symbolsSucceeded`, `symbolsFailed`, `gatePassed`, `newCandidates`, `resumedCandidates`,
 `researchCompleted`, `cursorBefore` / `cursorAfter`, the three lane statuses and the
 `discoveryStatus` — in `rationale`, in the run's own words, and writes it back with the ledger.
 
@@ -738,6 +755,13 @@ says which findings survive a missing filing and which of them collapse to `data
 once through `decision_submit`, what each action means and which one takes which target — is stated
 by the Aumos MCP server itself, once per session, and published as `decision_submit`'s own input
 schema. Read that schema and follow it wherever anything else disagrees with it.
+
+⛔ **Write your own memory before you submit, never after.** The catalyst register, the candidate
+ledger and the discovery record are `files_write` calls, and the workspace closes with the
+judgement: after `decision_submit` they come back `workspace-write-failed: The database connection
+is not open` — a message that names neither the cause nor the fix. Measured in
+`run_28dc224c3d984252a10eeb2597471ec4`, where every candidate found after the submit was lost
+without a word. Sealing the answer is the last thing this run does.
 
 Your `rationale` is what a person reads:
 

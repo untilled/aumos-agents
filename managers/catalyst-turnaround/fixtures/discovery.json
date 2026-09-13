@@ -241,8 +241,8 @@
       }
     },
     {
-      "name": "the-budget-spent-on-held-names-is-discovery-not-run",
-      "why": "The run reviewed the book, the filings budget went on it, and no range was swept. #305 says this is reported as discovery_not_run and never as «no new candidate was found» — the two are indistinguishable in the answer and opposite in meaning.",
+      "name": "a-run-that-read-no-index-page-is-discovery-not-run",
+      "why": "The run reviewed the book, spent its calls on it, and read not one page of the whole-market index. A page is a single /api/list.json call with no corp_code in it, so no page read means nothing was looked at — whatever the calls went on. #305 says this is reported as discovery_not_run and never as «no new candidate was found»: the two are indistinguishable in the answer and opposite in meaning.",
       "overrides": {
         "uncertainty": ["이번 실행의 발굴 상태는 discovery_not_run 입니다."],
       "ranges": [],
@@ -252,7 +252,7 @@
       "expect": {
         "discoveryStatus": "discovery_not_run",
         "cursorAfterEqualsBefore": true,
-        "diagnosticCodes": ["discovery_budget_spent_on_holdings"],
+        "diagnosticCodes": ["no_index_page_read"],
         "noBlockedDiagnostic": true
       }
     },

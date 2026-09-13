@@ -27,7 +27,7 @@ import { LEDGER_VOCABULARY } from './ledger.mjs'
  * |---|---|
  * | `candidates_produced` | the sweep ran and at least one name came out of it |
  * | `no_candidate_qualified` | the sweep ran **completely** and nothing qualified |
- * | `discovery_not_run` | no universe, no budget left, or every required lane shut |
+ * | `discovery_not_run` | no index page read, no universe, or every required lane shut |
  * | `discovery_incomplete` | the sweep ran and some range failed, was not reached, or a required lane is not `open` |
  *
  * ⚠️ **More than one row holds at once, so the precedence is part of the contract:**
@@ -234,14 +234,14 @@ export function discoveryRun({
   if (asOfInstant === null) {
     diagnostics.push(diagnostic('as_of_unreadable', 'blocked', 'Every judgement in this package is pinned to asOf and there is no default', 'asOf'))
     return {
-      data: { run: emptyRecord(runId, null), observations: [], watching: [], failedRanges: [], eventsSeen: 0 },
+      data: { run: emptyRecord(runId, null), indexPagesRead: 0, observations: [], watching: [], failedRanges: [], eventsSeen: 0 },
       diagnostics,
       causes,
     }
   }
 
   const staleDays = finite(config.priorYearStaleDays) ? config.priorYearStaleDays : METHODOLOGY.priorYearStaleDays
-  const budget = Number.isInteger(config.discoveryBudgetFilings) ? config.discoveryBudgetFilings : METHODOLOGY.discoveryBudgetFilings
+  const pageBudget = Number.isInteger(config.discoveryIndexPages) ? config.discoveryIndexPages : METHODOLOGY.discoveryIndexPages
   const floor = Number.isInteger(config.researchCompletionFloor) ? config.researchCompletionFloor : METHODOLOGY.researchCompletionFloor
 
   // ── ① the universe, which the host has no concept of ──────────────────────
@@ -322,27 +322,42 @@ export function discoveryRun({
     swept.push({ cursor, status: outcome.status, dartStatus: outcome.dartStatus, symbols, events: Array.isArray(range?.events) ? range.events : [] })
   }
 
-  const attemptedFilings = swept.length
-  if (attemptedFilings + filingsSpentOnHoldings > budget) {
+  /**
+   * ⚠️ **A swept range is a page of the whole-market index**, which is one
+   * `/api/list.json` call with no `corp_code` in it. The budget is counted in
+   * those pages and not in filings: the old `discoveryBudgetFilings` said
+   * «filings», was read as «100 filings of one issuer», and a run duly spent its
+   * whole sweep on one name.
+   */
+  const indexPagesRead = swept.length
+  if (indexPagesRead > pageBudget) {
     diagnostics.push(
       diagnostic(
         'discovery_budget_exceeded',
         'note',
-        `This run touched ${attemptedFilings + filingsSpentOnHoldings} filings against a ${budget}-filing budget. The budget is a cost ceiling and not a correctness rule, so the sweep is recorded as it happened — what is not allowed is spending it and then reporting that nothing qualified`,
-        'config.discoveryBudgetFilings',
-        { attemptedFilings, filingsSpentOnHoldings, discoveryBudgetFilings: budget },
+        `This run read ${indexPagesRead} whole-market index page(s) against a ${pageBudget}-page budget. The budget is a cost ceiling and not a correctness rule, so the sweep is recorded as it happened — what is not allowed is spending it and then reporting that nothing qualified`,
+        'config.discoveryIndexPages',
+        { indexPagesRead, filingsSpentOnHoldings, discoveryIndexPages: pageBudget },
       ),
     )
   }
-  const budgetSpentOnHoldings = filingsSpentOnHoldings >= budget && attemptedFilings === 0
-  if (budgetSpentOnHoldings) {
+  /**
+   * ⛔ **No page read is `discovery_not_run`, whatever the run spent its calls
+   * on.** One page is one cheap request over every issuer that filed since the
+   * cursor, so a run that read none of them looked nowhere — whether because the
+   * whole effort went on the held book, because resuming ate it, or because the
+   * sweep was never attempted. #305 is explicit that this is reported and never
+   * dressed up as «no new candidate was found».
+   */
+  const noIndexPageRead = indexPagesRead === 0
+  if (noIndexPageRead) {
     diagnostics.push(
       diagnostic(
-        'discovery_budget_spent_on_holdings',
+        'no_index_page_read',
         'unevaluated',
-        'The whole filing budget went on reviewing what is already held, so no range was swept. #305 is explicit that this is reported as discovery_not_run and never as «no new candidate was found»',
-        'filingsSpentOnHoldings',
-        { filingsSpentOnHoldings, discoveryBudgetFilings: budget },
+        'Not one page of the whole-market index was read this run, so nothing was looked at: the effort went on the held book, or the sweep did not run. A page is a single /api/list.json call with no corp_code in it, and this run is discovery_not_run rather than «no new candidate was found»',
+        'ranges',
+        { indexPagesRead, filingsSpentOnHoldings, discoveryIndexPages: pageBudget },
       ),
     )
   }
@@ -555,7 +570,7 @@ export function discoveryRun({
   const anyRangeFailed = swept.some((row) => row.status !== 'succeeded')
   const produced = newCandidates + resumedCandidates > 0
   let discoveryStatus
-  if (!ledgerRead || !universeDeclared || budgetSpentOnHoldings || requiredLanesShut) discoveryStatus = 'discovery_not_run'
+  if (!ledgerRead || !universeDeclared || noIndexPageRead || requiredLanesShut) discoveryStatus = 'discovery_not_run'
   else if (anyRangeFailed || symbolsFailed.size > 0 || !requiredLanesOpen) discoveryStatus = 'discovery_incomplete'
   else if (produced) discoveryStatus = 'candidates_produced'
   else discoveryStatus = 'no_candidate_qualified'
@@ -644,6 +659,16 @@ export function discoveryRun({
   return {
     data: {
       run,
+      /**
+       * ⚠️ **Beside the record and not inside it.** `PROMPT.md`'s discovery
+       * record carries `indexPagesRead` because the width of a sweep is the fact
+       * a later reader cannot reconstruct from `discovery_incomplete` alone; the
+       * *record object* is `docs/contracts/discovery-run.md` §7.1, whose field
+       * list is shared verbatim with `fundamental-mean-reversion` and
+       * `shareholder-rerating`, so a twentieth field there is a change to three
+       * packages and a contract rather than to this one.
+       */
+      indexPagesRead,
       observations: recordable,
       watching,
       failedRanges,
