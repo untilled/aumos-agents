@@ -1,6 +1,6 @@
 ---
 name: ct-event-sweep
-description: "How this desk finds an event it did not already know about: the incremental OpenDART sweep through the host's source cache, the corp_code join it cannot skip, the classification it has to do itself because the filings index has no type filter, the difference between status 013 and status 020, the policy-gazette web lane through observation:file, and how the candidate ledger is written back with a hash. Read this before sweeping, before recording a vendor failure, and before moving the cursor."
+description: "How this desk finds an event it did not already know about: the whole-market OpenDART index call the sweep is made of, the corp_code join every per-issuer read owes, the classification it has to do itself because the filings index has no type filter, the difference between status 013 and status 020, the policy-gazette web lane through observation:file, and how the candidate ledger is written back with a hash. Read this before sweeping, before recording a vendor failure, and before moving the cursor."
 ---
 
 # The sweep, and the four places it goes wrong quietly
@@ -10,11 +10,20 @@ sweep has four failure modes that all look like success: a cursor that walked ov
 read, an empty answer mistaken for an exhausted quota, a candidate built from a search-result
 summary, and a ledger written over another run's.
 
-## 1. The store, not the vendor
+## 1. The store for documents, the vendor for the index
 
-⛔ **Do not call OpenDART directly to sweep.** The host keeps a per-fund source cache and #305 is
-explicit that this package reuses it rather than building a second one in private memory. Two tools:
-`source_cache_read` to read what is held, `source_cache_refresh` to go and get more.
+⛔ **Do not build a second store in private memory.** The host keeps a per-fund source cache and #305
+is explicit that this package reuses it rather than copying documents into `manager-memory`. Two
+tools: `source_cache_read` to read what is held, `source_cache_refresh` to go and get more.
+
+⚠️ **The one thing the store cannot answer is the index, so the index call is yours and it is
+allowed.** `source_cache_read` and `filings_list` return `documentKey` (= `rcept_no`), `version`,
+`publishedAt` and `capturedAt` — and **no `report_nm`**, which is the only field §3 classifies from
+(measured in `run_28dc224c3d984252a10eeb2597471ec4`, and filed with Aumos; until it lands the vendor
+is the route). So the two divide by job: **classification is a direct `source_request` to `open-dart`
+`/api/list.json`**, which is on this package's allowlist and is §3's main road; **the documents of a
+named issuer are collected and kept through `source_cache_*`**. What #305 forbids is the private
+copy, not the call.
 
 ⚠️ **Incrementality is store-side, and it is not a cursor.** There is **no `since` parameter and no
 vendor cursor.** What you get instead is a **state**, and the four words are the whole contract:
@@ -36,26 +45,55 @@ vendor cursor.** What you get instead is a **state**, and the four words are the
 ⚠️ **`freshFor` is required on every read.** There is no default, and "how fresh is fresh enough" is
 a decision this desk makes rather than one it inherits.
 
-## 2. The join you cannot skip
+## 2. The join, and the sweep that does not need it
 
-The filings index is keyed by **`corp_code`**, which is OpenDART's own identifier and is *not* the
-six-digit KRX ticker. The mapping lives in the `open-dart/corp-codes` document, whose `vendorId` is
-the stock code (`005930`) and whose document key is `corpcode:<corp_code>`.
+A filings request **for one issuer** is keyed by **`corp_code`**, which is OpenDART's own identifier
+and is *not* the six-digit KRX ticker. The mapping lives in the `open-dart/corp-codes` document,
+whose `vendorId` is the stock code (`005930`) and whose document key is `corpcode:<corp_code>`.
 
 ```text
 symbol (005930)  →  open-dart/corp-codes  →  corp_code  →  open-dart/filings
 ```
 
-⛔ **This is a required step and never a fallback.** A run that "tries the ticker first and falls
-back to the corp-code list" will, for a subset of issuers, get an answer that is somebody else's
-filings or no filings at all — and the second is indistinguishable from an issuer that filed nothing.
-If the corp-code document cannot be read, the filing lane is `dark` for that issuer. It is not empty.
+⛔ **Wherever a request names an issuer, this is a required step and never a fallback.** A run that
+"tries the ticker first and falls back to the corp-code list" will, for a subset of issuers, get an
+answer that is somebody else's filings or no filings at all — and the second is indistinguishable
+from an issuer that filed nothing. If the corp-code document cannot be read, the filing lane is
+`dark` for that issuer. It is not empty.
 
-## 3. What the index actually contains, and what you have to do yourself
+⚠️ **§3's sweep names no issuer, so it owes this join nothing.** The join is what a **deep read** of
+one company costs — three to five of them in a run — and never what *looking* costs. Paying it per
+ticker before anything has been classified turns KOSPI's 804 issuers into 2,412 calls, which is not a
+slower sweep but a sweep that cannot finish; the run that tried it read **one** name.
 
-`open-dart/filings` is an **index**, not a set of documents. Per row: `rcept_no`, `rcept_dt`,
-`report_nm`. ⛔ No figures. No normalised fields. **No type filter.** And the request is fixed —
-`bgn_de` = `asOf` − 5 years, `end_de` = `asOf`, sorted newest-first, 100 rows a page.
+## 3. The whole-market index, and what you have to do yourself
+
+The filings index is an **index**, not a set of documents. Per row: `rcept_no`, `rcept_dt`,
+`corp_name`, `corp_cls`, `report_nm`. ⛔ No figures. No normalised fields. **No type filter.**
+
+⛔ **The sweep is one market-wide call, and `corp_code` is the parameter you leave out of it.** With
+no issuer named, `/api/list.json` answers for every issuer that filed in the window; `total_count`
+says how many rows stand behind the answer and `page_no` walks them 100 at a time. `bgn_de` is the
+day after the range your cursor already holds and `end_de` is `asOf` — the five-year window belongs
+to a **deep read** of one issuer, not to looking. Measured, in
+`run_28dc224c3d984252a10eeb2597471ec4`: `bgn_de=20260814`, `end_de=20260913`, `corp_cls=Y`,
+`pblntf_ty=B`, `sort=date`, `sort_mth=desc`, `page_no=1`, `page_count=100` → status `000`,
+`total_count` 137, 100 rows in hand, **one call**.
+
+| `corp_cls` | market | | `pblntf_ty` | what is filed under it, and what this desk reads it for |
+|---|---|---|---|---|
+| `Y` | 유가증권 (KOSPI) | | `A` | 정기공시 — the report a confirming indicator is finally read out of |
+| `K` | 코스닥 | | `B` | 주요사항보고 — ⚠️ **this desk's lane**: 유상증자, 회사채 발행, 자산 양수도, 회생절차, 영업정지 |
+| `N` | 코넥스 | | `C` · `D` | 발행공시 · 지분공시 — the raise once B announced it; ownership is another desk's entrance |
+| `E` | 기타 | | `E` · `F` | 기타공시 · 외부감사관련 — an audit opinion is a survivability fact |
+| | | | `I` | 거래소공시 — ⚠️ 실적공시 and 조회공시 해명, where a narrowing loss shows up before the report |
+| | | | `G` `H` `J` | 펀드공시 · 자산유동화 · 공정위공시 — not this desk |
+
+⚠️ **The run is a fan-out, and the two halves do not cost the same.** `discoveryIndexPages` cheap
+whole-market pages (3 by default) → classify every row from `report_nm` → carry **three to five**
+names into the expensive per-issuer work, which is §2's join and then the filings and the financials.
+⛔ Inverted, the sweep cannot finish at any budget, and a desk whose every run therefore reports
+`discovery_incomplete` has a status word that carries no information.
 
 Three consequences, and all three are yours to handle:
 
@@ -75,7 +113,7 @@ Three consequences, and all three are yours to handle:
    claims. ⚠️ Two events naming one channel are **one** improving channel, not two — that is
    `minImprovingChannels`' whole point and it starts here.
 
-2. **The page is the unit and the receipt is the boundary.** Because the window is fixed and
+2. **The page is the unit and the receipt is the boundary.** Because the index is sorted
    newest-first, incrementality is: read down the page until you reach the `rcept_no` your ledger's
    cursor holds, and stop. Everything above it is this run's range. The cursor you write back is the
    **newest receipt in the newest range you finished**, `{ "kind": "dart-receipt", "value": "<rcept_no>" }`.
