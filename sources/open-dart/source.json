@@ -1,9 +1,9 @@
 {
   "spec": "SourceSpec/1",
   "id": "open-dart",
-  "version": "0.1.0",
+  "version": "0.2.0",
   "vendor": "open-dart",
-  "caveat": "OpenDART's own endpoints, relayed unread. A filing becomes public at its receipt — `rcept_no` begins with the receipt date and `rcept_dt` repeats it — and nothing here is bounded by `asOf`: reading those fields and dropping later rows is the caller's work. A period end is not a disclosure date, and a preliminary announcement and the periodic report that restates it are two filings with two receipts; `report_nm` and `pblntf_ty` tell them apart. `corpCode.xml` answers with a ZIP. The investor's key is appended as `crtfc_key`, never shown to a manager. Errors arrive as `status` on a 200.",
+  "caveat": "OpenDART's own endpoints, relayed unread. A filing becomes public at its receipt, which `rcept_no` and `rcept_dt` both carry; dropping rows later than `asOf` is the caller's work, as nothing here is bounded by it. A period end is not a disclosure date, and a preliminary announcement and the report restating it are two receipts, told apart by `report_nm` and `pblntf_ty`. `corpCode.xml` and `document.xml` answer with a ZIP the host unpacks; the latter's members are named per request and arrive as `{members:[{name,text}]}`. The key rides as `crtfc_key`, unseen. Errors arrive as `status` on a 200.",
   "hosts": [
     "opendart.fss.or.kr"
   ],
@@ -67,6 +67,13 @@
         "corp_code",
         "bsns_year",
         "reprt_code"
+      ]
+    },
+    {
+      "host": "opendart.fss.or.kr",
+      "path": "/api/document.xml",
+      "query": [
+        "rcept_no"
       ]
     }
   ]

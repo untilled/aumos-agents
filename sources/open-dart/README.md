@@ -24,6 +24,7 @@ this source relays those endpoints unread.
 | `/api/list.json` | filings in a date range, with receipt number, receipt date and disclosure type |
 | `/api/fnlttSinglAcntAll.json` | one filer's full financial statements for a business year and report |
 | `/api/fnlttSinglAcnt.json` | the same filer's major accounts, when the full statement is more than needed |
+| `/api/document.xml` | the original filing document for one receipt number, unpacked to `{members:[{name,text}]}` |
 
 ## The receipt is the moment, not the period
 
@@ -52,11 +53,24 @@ sources; Aumos keeps it in the system keychain and appends it as the `crtfc_key`
 parameter on every request. No manager ever sees it, and no manager can set that parameter
 itself — a request that tries is refused.
 
-## Two vendor behaviours worth knowing before you rely on it
+**Minimum Aumos version: v0.11.0.** That is the build that unpacks `document.xml`; an older
+one reads the archive as JSON and the call fails.
 
-**`corpCode.xml` answers with a ZIP archive.** Aumos relays it exactly as sent, which means
-a manager that cannot decompress bytes cannot read it. The usable alternative is
-`list.json`, whose rows carry both `corp_code` and `stock_code`.
+## Three vendor behaviours worth knowing before you rely on it
+
+**`corpCode.xml` answers with a ZIP archive.** Aumos unpacks it: the archive holds one
+document under a name Aumos knows (`CORPCODE.xml`), and what comes back is that document's
+rows. A manager does not decompress anything.
+
+**`document.xml` answers with a ZIP too, and it is the only way in.** Aumos unpacks this one
+as well, but it cannot name what is inside — the members are the receipt number's own file,
+and a filing submitted in parts holds `<rcept_no>_00001.xml` and its siblings. So the answer
+is `{"members":[{"name":…,"text":…}]}`: every member, under the vendor's own name, in archive
+order, decoded as UTF-8 and otherwise unread. The text is DART's own DSD markup and reading
+it is the manager's work. An index row from `list.json` carries only `rcept_no`, `rcept_dt` and
+`report_nm`; the figures and dates inside a 주요사항보고서 — the transfer amount, the scheduled
+date, the settlement date, the capital-reduction ratio, the terms of a guarantee — are in the
+body and nowhere else, and `document.xml` with that `rcept_no` is the only route to them.
 
 **Errors arrive with HTTP 200.** OpenDART reports its own status in a `status` field:
 `000` success, `013` no data for the query, `020` request quota exceeded, `100` bad

@@ -196,7 +196,7 @@
     {
       "name": "open-dart",
       "source": "./sources/open-dart",
-      "version": "0.1.0",
+      "version": "0.2.0",
       "metadata": {
         "publisher": "aumos",
         "vendor": "open-dart",
@@ -258,6 +258,13 @@
               "corp_code",
               "bsns_year",
               "reprt_code"
+            ]
+          },
+          {
+            "host": "opendart.fss.or.kr",
+            "path": "/api/document.xml",
+            "query": [
+              "rcept_no"
             ]
           }
         ],
